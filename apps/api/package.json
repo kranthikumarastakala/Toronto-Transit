@@ -1,0 +1,23 @@
+{
+  "name": "@signalto/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787",
+    "build": "tsc --noEmit && wrangler deploy --dry-run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "gtfs-realtime-bindings": "^1.1.1",
+    "hono": "^4.12.12",
+    "papaparse": "^5.5.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260413.1",
+    "@types/papaparse": "^5.5.2",
+    "typescript": "^6.0.2",
+    "wrangler": "^4.81.1"
+  }
+}
