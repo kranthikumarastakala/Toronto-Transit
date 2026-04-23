@@ -220,8 +220,10 @@ export type TtcCommuteEvaluationResponse = {
   transferOptions: TtcTransferCommuteOption[];
 };
 
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+
 async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(path);
+  const response = await fetch(`${API_BASE}${path}`);
 
   if (!response.ok) {
     try {
