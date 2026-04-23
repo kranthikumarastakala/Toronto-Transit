@@ -71,6 +71,25 @@ export type TtcVehicleSummaryResponse = {
   }>;
 };
 
+export type TtcVehicle = {
+  vehicleId: string | null;
+  label: string | null;
+  routeId: string | null;
+  routeShortName: string | null;
+  routeTypeLabel: string;
+  tripId: string | null;
+  latitude: number;
+  longitude: number;
+  bearing: number | null;
+  currentStatus: number | null;
+};
+
+export type TtcVehiclePositionsResponse = {
+  generatedAt: string;
+  totalVehicles: number;
+  vehicles: TtcVehicle[];
+};
+
 export type TtcStop = {
   stopId: string;
   stopCode: string | null;
@@ -229,6 +248,7 @@ export const api = {
   getFeedStatus: () => getJson<FeedStatusResponse>("/api/feed-status"),
   getTtcAlerts: () => getJson<TtcAlertsResponse>("/api/ttc/alerts"),
   getTtcVehicleSummary: () => getJson<TtcVehicleSummaryResponse>("/api/ttc/vehicles/summary"),
+  getTtcVehiclePositions: () => getJson<TtcVehiclePositionsResponse>("/api/ttc/vehicles"),
   getNearbyTtcStops: (params: { lat: number; lon: number; radius?: number; limit?: number }) =>
     getJson<TtcNearbyStopsResponse>(
       `/api/ttc/stops/nearby?lat=${params.lat}&lon=${params.lon}&radius=${params.radius ?? 750}&limit=${params.limit ?? 8}`

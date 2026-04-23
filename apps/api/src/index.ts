@@ -7,6 +7,7 @@ import {
   getTtcAlertSummaries,
   getTtcStopArrivals,
   getTtcVehicleSummary,
+  getTtcVehiclePositions,
   searchTtcStops
 } from "./ttc";
 import { transitSources } from "./transit-sources";
@@ -224,6 +225,23 @@ app.get("/api/ttc/vehicles/summary", async (c) => {
 
     return c.json(payload, 200, {
       "Cache-Control": "public, max-age=20"
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: error instanceof Error ? error.message : "Unable to load TTC vehicle positions."
+      },
+      502
+    );
+  }
+});
+
+app.get("/api/ttc/vehicles", async (c) => {
+  try {
+    const payload = await getTtcVehiclePositions();
+
+    return c.json(payload, 200, {
+      "Cache-Control": "public, max-age=15"
     });
   } catch (error) {
     return c.json(

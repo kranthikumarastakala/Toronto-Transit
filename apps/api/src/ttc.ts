@@ -815,6 +815,51 @@ export async function getTtcVehicleSummary() {
   };
 }
 
+export async function getTtcVehiclePositions() {
+  const [vehicleFeed, staticDataset] = await Promise.all([
+    decodeFeed(ttcVehicleSource.url),
+    getTtcStaticDataset()
+  ]);
+
+  const entities = vehicleFeed.entity ?? [];
+  const vehicles = entities
+    .map((entity) => entity.vehicle)
+    .filter((vehicle): vehicle is NonNullable<typeof vehicle> => Boolean(vehicle))
+    .filter((vehicle) => vehicle.position?.latitude && vehicle.position?.longitude)
+    .map((vehicle) => {
+      const routeId = vehicle.trip?.routeId ?? null;
+      const route = routeId ? staticDataset.routesById.get(routeId) : null;
+      const routeTypeLabel = route?.routeTypeLabel ?? "bus";
+      const bearingRaw = vehicle.position?.bearing;
+      const bearing =
+        bearingRaw !== null && bearingRaw !== undefined
+          ? typeof bearingRaw === "number"
+            ? bearingRaw
+            : typeof (bearingRaw as { toNumber?: () => number }).toNumber === "function"
+              ? (bearingRaw as { toNumber: () => number }).toNumber()
+              : null
+          : null;
+      return {
+        vehicleId: vehicle.vehicle?.id ?? null,
+        label: vehicle.vehicle?.label ?? null,
+        routeId,
+        routeShortName: route?.routeShortName ?? routeId,
+        routeTypeLabel,
+        tripId: vehicle.trip?.tripId ?? null,
+        latitude: vehicle.position!.latitude as number,
+        longitude: vehicle.position!.longitude as number,
+        bearing,
+        currentStatus: vehicle.currentStatus ?? null
+      };
+    });
+
+  return {
+    generatedAt: formatIsoFromUnixSeconds(vehicleFeed.header?.timestamp) ?? new Date().toISOString(),
+    totalVehicles: vehicles.length,
+    vehicles
+  };
+}
+
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
   const earthRadiusMeters = 6_371_000;
   const toRadians = (value: number) => (value * Math.PI) / 180;

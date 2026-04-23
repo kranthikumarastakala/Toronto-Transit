@@ -4,6 +4,13 @@ dist/
 .dev.vars
 coverage/
 
+# Dev service-worker build artefacts
+apps/web/dev-dist/
+
+# Runtime logs
+.run/*.log
+apps/web/build.log
+
 ttc_nvas_page.html
 go_developers_page.html
 

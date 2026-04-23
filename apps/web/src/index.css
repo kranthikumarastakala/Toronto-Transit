@@ -218,10 +218,10 @@ a {
 }
 
 .signalto-panel-title {
-  font-size: clamp(1.45rem, 2vw, 2rem);
+  font-size: clamp(1.1rem, 1.6vw, 1.5rem);
   font-weight: 700;
-  line-height: 1.08;
-  letter-spacing: -0.04em;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
 }
 
 .signalto-display {
@@ -270,6 +270,46 @@ a {
   border: 1px solid rgba(16, 34, 51, 0.06);
 }
 
+.signalto-search-field {
+  position: relative;
+}
+
+.signalto-search-input-wrap {
+  position: relative;
+}
+
+.signalto-dropdown {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  max-height: 18rem;
+  overflow-y: auto;
+  border-radius: 1.2rem;
+  border: 1px solid rgba(16, 34, 51, 0.1);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 20px 50px rgba(16, 34, 51, 0.14);
+  padding: 0.5rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.signalto-dropdown::-webkit-scrollbar {
+  width: 0.45rem;
+}
+
+.signalto-dropdown::-webkit-scrollbar-thumb {
+  background: rgba(16, 34, 51, 0.14);
+  border-radius: 999px;
+}
+
+.signalto-dropdown-hint {
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  color: rgba(16, 34, 51, 0.54);
+}
+
 .signalto-input.form-control {
   min-height: 3.35rem;
   border-radius: 1rem;
@@ -284,7 +324,7 @@ a {
 }
 
 .signalto-scroll {
-  max-height: 34rem;
+  max-height: 16rem;
   overflow: auto;
   padding-right: 0.25rem;
 }
@@ -487,6 +527,26 @@ a {
   height: 2rem;
 }
 
+/* Vehicle tracker pulse animation */
+@keyframes stk-pulse {
+  0%   { opacity: 0.6; transform: scale(0.85); }
+  70%  { opacity: 0;   transform: scale(1.5); }
+  100% { opacity: 0;   transform: scale(1.5); }
+}
+
+/* Leaflet popup font override */
+.leaflet-popup-content {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 0.9rem;
+}
+.leaflet-popup-content-wrapper {
+  border-radius: 1rem !important;
+  box-shadow: 0 8px 32px rgba(16,34,51,0.16) !important;
+}
+.leaflet-popup-tip-container {
+  margin-top: -1px;
+}
+
 @media (max-width: 991.98px) {
   .signalto-nav {
     padding-top: 0.65rem;
@@ -500,7 +560,7 @@ a {
   }
 
   .signalto-scroll {
-    max-height: none;
+    max-height: 18rem;
   }
 }
 
