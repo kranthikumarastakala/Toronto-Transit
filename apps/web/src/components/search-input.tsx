@@ -45,6 +45,8 @@ export function SearchInput({
   const showResults = focused && searching;
   const showSuggestions = focused && !searching && !selectedStop && suggestions.length > 0;
   const showDropdown = showResults || showSuggestions;
+  // Cache outside JSX so TypeScript doesn't narrow selectedStop to null inside showSuggestions block
+  const selectedStopId = selectedStop != null ? selectedStop.stopId : null;
 
   function handleChoose(stop: TtcStop) {
     onChooseStop(stop);
@@ -140,7 +142,7 @@ export function SearchInput({
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleChoose(stop)}
-                    className={`signalto-stop-button ${selectedStop?.stopId === stop.stopId ? "is-selected" : ""}`}
+                    className={`signalto-stop-button ${selectedStopId === stop.stopId ? "is-selected" : ""}`}
                   >
                     <div className="d-flex align-items-center justify-content-between gap-3">
                       <div style={{ minWidth: 0 }}>
