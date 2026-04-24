@@ -17,6 +17,8 @@ type SearchInputProps = {
   // Suggestions shown before the user types (e.g. nearby stops)
   suggestions?: (TtcStop & { distanceMeters?: number })[];
   suggestionsLabel?: string;
+  // Label shown above search results (e.g. "Nearest stops to your address")
+  resultsLabel?: string;
   // One-tap location shortcut shown under the label
   locationShortcut?: { label: string; stop: TtcStop } | null;
 };
@@ -35,6 +37,7 @@ export function SearchInput({
   onClear,
   suggestions = [],
   suggestionsLabel = "Nearby stops",
+  resultsLabel,
   locationShortcut
 }: SearchInputProps) {
   const searching = value.trim().length >= 2;
@@ -165,7 +168,7 @@ export function SearchInput({
                   borderTop: "1px solid rgba(0,0,0,0.05)",
                   marginTop: "4px"
                 }}>
-                  Or start typing any stop name, street, or route number
+                  Or type an address, stop name, or route number
                 </div>
               </>
             ) : isLoading ? (
@@ -173,7 +176,21 @@ export function SearchInput({
             ) : isError ? (
               <div className="signalto-dropdown-hint text-danger">Unable to search TTC stops right now.</div>
             ) : results.length ? (
-              results.map((stop) => (
+              <>
+                {resultsLabel && (
+                  <div style={{
+                    fontSize: "0.67rem",
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: "#aaa",
+                    padding: "8px 14px 4px"
+                  }}>
+                    <i className="bi bi-geo-alt me-1" aria-hidden="true" style={{ color: "#0f5b52" }} />
+                    {resultsLabel}
+                  </div>
+                )}
+                {results.map((stop) => (
                 <button
                   key={stop.stopId}
                   type="button"
@@ -195,9 +212,10 @@ export function SearchInput({
                     {formatWheelchair(stop.wheelchairBoarding)}
                   </div>
                 </button>
-              ))
+                ))}
+              </>
             ) : (
-              <div className="signalto-dropdown-hint">No TTC stops matched that search.</div>
+              <div className="signalto-dropdown-hint">No stops found. Try a different address or stop name.</div>
             )}
           </div>
         )}

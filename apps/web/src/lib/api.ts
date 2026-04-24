@@ -263,3 +263,18 @@ export const api = {
       `/api/ttc/commutes/evaluate?fromStopId=${encodeURIComponent(fromStopId)}&toStopId=${encodeURIComponent(toStopId)}`
     )
 };
+
+export type GeocodedPlace = {
+  lat: number;
+  lon: number;
+  displayName: string;
+};
+
+export async function geocodeAddress(query: string): Promise<GeocodedPlace[]> {
+  const encoded = encodeURIComponent(`${query}, Toronto, Ontario, Canada`);
+  const url = `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&limit=3&countrycodes=ca`;
+  const response = await fetch(url, { headers: { "Accept-Language": "en", "User-Agent": "TorontoTransit/1.0" } });
+  if (!response.ok) return [];
+  const data = (await response.json()) as Array<{ lat: string; lon: string; display_name: string }>;
+  return data.map((d) => ({ lat: parseFloat(d.lat), lon: parseFloat(d.lon), displayName: d.display_name }));
+}

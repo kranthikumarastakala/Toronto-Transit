@@ -7,7 +7,7 @@ import {
   createRouter
 } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { api, type TtcAlert, type TtcCommuteEvaluationResponse, type TtcStop, type TtcTransferCommuteOption } from "./lib/api";
+import { api, geocodeAddress, type TtcAlert, type TtcCommuteEvaluationResponse, type TtcStop, type TtcTransferCommuteOption } from "./lib/api";
 import { usePersistedState } from "./lib/use-persisted-state";
 import { SearchInput } from "./components/search-input";
 import { RecommendationCard } from "./components/recommendation-card";
@@ -212,6 +212,66 @@ function DashboardPage() {
     ? `Stops reachable from ${draftOrigin.stopName}`
     : "Nearby stops";
 
+  // When TTC stop search returns 0 matches, fall back to address geocoding
+  const originHasNoStopResults =
+    deferredOriginQuery.length >= 3 && !originSearch.isLoading && (originSearch.data?.totalMatches ?? -1) === 0;
+  const destinationHasNoStopResults =
+    deferredDestinationQuery.length >= 3 && !destinationSearch.isLoading && (destinationSearch.data?.totalMatches ?? -1) === 0;
+
+  const originGeocode = useQuery({
+    queryKey: ["geocode-origin", deferredOriginQuery],
+    queryFn: () => geocodeAddress(deferredOriginQuery),
+    enabled: originHasNoStopResults,
+    staleTime: 600_000
+  });
+
+  const destinationGeocode = useQuery({
+    queryKey: ["geocode-destination", deferredDestinationQuery],
+    queryFn: () => geocodeAddress(deferredDestinationQuery),
+    enabled: destinationHasNoStopResults,
+    staleTime: 600_000
+  });
+
+  const originGeocodeStops = useQuery({
+    queryKey: ["stops-near-geocode-origin", originGeocode.data?.[0]?.lat, originGeocode.data?.[0]?.lon],
+    queryFn: () =>
+      api.getNearbyTtcStops({ lat: originGeocode.data![0].lat, lon: originGeocode.data![0].lon, radius: 500, limit: 5 }),
+    enabled: Boolean(originGeocode.data?.[0]),
+    staleTime: 300_000
+  });
+
+  const destinationGeocodeStops = useQuery({
+    queryKey: ["stops-near-geocode-destination", destinationGeocode.data?.[0]?.lat, destinationGeocode.data?.[0]?.lon],
+    queryFn: () =>
+      api.getNearbyTtcStops({
+        lat: destinationGeocode.data![0].lat,
+        lon: destinationGeocode.data![0].lon,
+        radius: 500,
+        limit: 5
+      }),
+    enabled: Boolean(destinationGeocode.data?.[0]),
+    staleTime: 300_000
+  });
+
+  // Blended search results: prefer direct TTC stop matches, fall back to geocoded nearby stops
+  const originResults =
+    (originSearch.data?.stops.length ?? 0) > 0
+      ? (originSearch.data?.stops ?? [])
+      : (originGeocodeStops.data?.stops ?? []);
+  const destinationResults =
+    (destinationSearch.data?.stops.length ?? 0) > 0
+      ? (destinationSearch.data?.stops ?? [])
+      : (destinationGeocodeStops.data?.stops ?? []);
+
+  const originResultsLabel =
+    (originGeocodeStops.data?.stops.length ?? 0) > 0 && !(originSearch.data?.stops.length)
+      ? `Nearest TTC stops to "${originGeocode.data?.[0]?.displayName?.split(",")[0] ?? deferredOriginQuery}"`
+      : undefined;
+  const destinationResultsLabel =
+    (destinationGeocodeStops.data?.stops.length ?? 0) > 0 && !(destinationSearch.data?.stops.length)
+      ? `Nearest TTC stops to "${destinationGeocode.data?.[0]?.displayName?.split(",")[0] ?? deferredDestinationQuery}"`
+      : undefined;
+
   // Arrivals specifically for the From stop — used for 1-min departure alerts
   const originArrivals = useQuery({
     queryKey: ["ttc-origin-arrivals", originStop?.stopId],
@@ -331,12 +391,22 @@ function DashboardPage() {
     setDraftOrigin(stop);
     setOriginInput(stop.stopName);
     setSelectedStopId(stop.stopId);
+    // Auto-trigger trip search if destination is already set
+    if (draftDestination && !sameStop(stop, draftDestination)) {
+      setOriginStop(stop);
+      setDestinationStop(draftDestination);
+    }
   }
 
   function chooseDestinationStop(stop: TtcStop) {
     setDraftDestination(stop);
     setDestinationInput(stop.stopName);
     setSelectedStopId(stop.stopId);
+    // Auto-trigger trip search if origin is already set
+    if (draftOrigin && !sameStop(draftOrigin, stop)) {
+      setOriginStop(draftOrigin);
+      setDestinationStop(stop);
+    }
   }
 
   function clearOriginSelection() {
@@ -399,17 +469,18 @@ function DashboardPage() {
               <SearchInput
                 id="origin-search"
                 label="From"
-                placeholder="Search a TTC starting station or stop"
+                placeholder="Address, stop name, or route number"
                 value={originInput}
                 selectedStop={draftOrigin}
-                results={originSearch.data?.stops ?? []}
-                isLoading={originSearch.isLoading}
+                results={originResults}
+                isLoading={originSearch.isLoading || originGeocode.isLoading || originGeocodeStops.isLoading}
                 isError={originSearch.isError}
                 onChange={handleOriginInputChange}
                 onChooseStop={chooseOriginStop}
                 onClear={clearOriginSelection}
                 suggestions={nearbyStops.data?.stops ?? []}
                 suggestionsLabel={locationStatus === "ready" ? "Nearby stops · Your location" : "Nearby stops"}
+                resultsLabel={originResultsLabel}
                 locationShortcut={
                   nearbyStops.data?.stops[0]
                     ? { label: nearbyStops.data.stops[0].stopName, stop: nearbyStops.data.stops[0] }
@@ -432,17 +503,18 @@ function DashboardPage() {
               <SearchInput
                 id="destination-search"
                 label="Destination"
-                placeholder="Search your TTC destination station or stop"
+                placeholder="Address, stop name, or route number"
                 value={destinationInput}
                 selectedStop={draftDestination}
-                results={destinationSearch.data?.stops ?? []}
-                isLoading={destinationSearch.isLoading}
+                results={destinationResults}
+                isLoading={destinationSearch.isLoading || destinationGeocode.isLoading || destinationGeocodeStops.isLoading}
                 isError={destinationSearch.isError}
                 onChange={handleDestinationInputChange}
                 onChooseStop={chooseDestinationStop}
                 onClear={clearDestinationSelection}
                 suggestions={destinationSuggestions}
                 suggestionsLabel={destinationSuggestionsLabel}
+                resultsLabel={destinationResultsLabel}
               />
 
               {sameStop(draftOrigin, draftDestination) ? (
