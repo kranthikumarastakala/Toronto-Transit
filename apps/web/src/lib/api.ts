@@ -278,3 +278,44 @@ export async function geocodeAddress(query: string): Promise<GeocodedPlace[]> {
   const data = (await response.json()) as Array<{ lat: string; lon: string; display_name: string }>;
   return data.map((d) => ({ lat: parseFloat(d.lat), lon: parseFloat(d.lon), displayName: d.display_name }));
 }
+
+// ─── Photon address autocomplete (OSM-based, no auth required) ───────────────
+
+export type PhotonFeature = {
+  lat: number;
+  lon: number;
+  name: string;
+  street: string | null;
+  housenumber: string | null;
+  city: string | null;
+  state: string | null;
+  type: string;
+};
+
+export async function photonAutocomplete(query: string): Promise<PhotonFeature[]> {
+  if (query.trim().length < 2) return [];
+  const q = encodeURIComponent(`${query}, Toronto`);
+  const url = `https://photon.komoot.io/api/?q=${q}&lat=43.6532&lon=-79.3832&limit=6&lang=en`;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return [];
+    const data = (await resp.json()) as {
+      features?: Array<{
+        geometry: { coordinates: [number, number] };
+        properties: Record<string, string | undefined>;
+      }>;
+    };
+    return (data.features ?? []).map((f) => ({
+      lat: f.geometry.coordinates[1],
+      lon: f.geometry.coordinates[0],
+      name: f.properties.name ?? f.properties.street ?? "Unknown",
+      street: f.properties.street ?? null,
+      housenumber: f.properties.housenumber ?? null,
+      city: f.properties.city ?? null,
+      state: f.properties.state ?? null,
+      type: f.properties.type ?? f.properties.osm_key ?? "place"
+    }));
+  } catch {
+    return [];
+  }
+}
