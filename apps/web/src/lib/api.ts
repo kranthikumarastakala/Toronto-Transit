@@ -294,8 +294,8 @@ export type PhotonFeature = {
 
 export async function photonAutocomplete(query: string): Promise<PhotonFeature[]> {
   if (query.trim().length < 2) return [];
-  const q = encodeURIComponent(`${query}, Toronto`);
-  const url = `https://photon.komoot.io/api/?q=${q}&lat=43.6532&lon=-79.3832&limit=6&lang=en`;
+  const q = encodeURIComponent(query);
+  const url = `https://photon.komoot.io/api/?q=${q}&lat=43.6532&lon=-79.3832&limit=6&lang=en&bbox=-79.7,43.4,-79.0,43.9`;
   try {
     const resp = await fetch(url);
     if (!resp.ok) return [];

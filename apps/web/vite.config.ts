@@ -10,9 +10,9 @@ export default defineConfig({
         enabled: true
       },
       manifest: {
-        name: "SignalTO",
-        short_name: "SignalTO",
-        description: "Toronto transit feed monitor and commute intelligence prototype.",
+        name: "Transitly",
+        short_name: "Transitly",
+        description: "Real-time TTC transit tracker for Toronto. Live departures, nearby stops, service alerts, and smart trip planning.",
         theme_color: "#0d4d45",
         background_color: "#f4efe6",
         display: "standalone",

@@ -1,4 +1,15 @@
-import { useDeferredValue, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+function useDebounce<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setDebounced(value), delayMs);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [value, delayMs]);
+  return debounced;
+}
 import { useQuery } from "@tanstack/react-query";
 import {
   api,
@@ -539,21 +550,21 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
     setDestinationPlace({ lat: presetDestinationStop.latitude, lon: presetDestinationStop.longitude, name: presetDestinationStop.stopName, street: null, housenumber: null, city: "Toronto", state: "Ontario", type: "stop" });
   }, [presetDestinationStop?.stopId]);
 
-  const deferredOriginQuery = useDeferredValue(originInput.trim());
-  const deferredDestQuery = useDeferredValue(destinationInput.trim());
+  const debouncedOriginQuery = useDebounce(originInput.trim(), 200);
+  const debouncedDestQuery = useDebounce(destinationInput.trim(), 200);
 
   // Photon autocomplete for each field
   const originSuggestions = useQuery({
-    queryKey: ["photon-origin", deferredOriginQuery],
-    queryFn: () => photonAutocomplete(deferredOriginQuery),
-    enabled: deferredOriginQuery.length >= 2 && !originPlace,
+    queryKey: ["photon-origin", debouncedOriginQuery],
+    queryFn: () => photonAutocomplete(debouncedOriginQuery),
+    enabled: debouncedOriginQuery.length >= 2 && !originPlace,
     staleTime: 60_000
   });
 
   const destSuggestions = useQuery({
-    queryKey: ["photon-dest", deferredDestQuery],
-    queryFn: () => photonAutocomplete(deferredDestQuery),
-    enabled: deferredDestQuery.length >= 2 && !destinationPlace,
+    queryKey: ["photon-dest", debouncedDestQuery],
+    queryFn: () => photonAutocomplete(debouncedDestQuery),
+    enabled: debouncedDestQuery.length >= 2 && !destinationPlace,
     staleTime: 60_000
   });
 

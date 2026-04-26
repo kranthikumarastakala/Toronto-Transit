@@ -15,7 +15,14 @@ import { SectionHeader } from "./components/section-header";
 import { LiveVehicleMap } from "./components/live-vehicle-map";
 import { JourneyPlanPanel } from "./components/journey-plan-panel";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      staleTime: 30_000
+    }
+  }
+});
 
 type LocationState = {
   latitude: number;

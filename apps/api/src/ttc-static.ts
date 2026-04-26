@@ -70,9 +70,53 @@ export type TtcStaticDataset = {
 };
 
 const STATIC_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const EDGE_CACHE_KEY = "https://ttc-internal-cache/static-dataset/v1";
+const EDGE_CACHE_TTL_SECONDS = 6 * 60 * 60;
 
 let staticDatasetPromise: Promise<TtcStaticDataset> | null = null;
 let staticDatasetExpiresAt = 0;
+
+type SerializedDataset = {
+  fetchedAt: string;
+  stops: SearchableStop[];
+  routes: TtcRoute[];
+  trips: TtcTrip[];
+};
+
+async function loadFromEdgeCache(): Promise<TtcStaticDataset | null> {
+  try {
+    const cache = await caches.open("ttc-static");
+    const cached = await cache.match(new Request(EDGE_CACHE_KEY));
+    if (!cached) return null;
+    const data = (await cached.json()) as SerializedDataset;
+    const stopsById = new Map(data.stops.map((s) => [s.stopId, s]));
+    const routesById = new Map(data.routes.map((r) => [r.routeId, r]));
+    const tripsById = new Map(data.trips.map((t) => [t.tripId, t]));
+    return { fetchedAt: data.fetchedAt, stops: data.stops, stopsById, routesById, tripsById };
+  } catch {
+    return null;
+  }
+}
+
+async function saveToEdgeCache(dataset: TtcStaticDataset): Promise<void> {
+  try {
+    const cache = await caches.open("ttc-static");
+    const payload: SerializedDataset = {
+      fetchedAt: dataset.fetchedAt,
+      stops: dataset.stops,
+      routes: Array.from(dataset.routesById.values()),
+      trips: Array.from(dataset.tripsById.values())
+    };
+    await cache.put(
+      new Request(EDGE_CACHE_KEY),
+      new Response(JSON.stringify(payload), {
+        headers: { "Cache-Control": `public, max-age=${EDGE_CACHE_TTL_SECONDS}`, "Content-Type": "application/json" }
+      })
+    );
+  } catch {
+    // ignore cache write failures — in-memory cache still works
+  }
+}
 
 function parseCsvRows<T>(content: string, fileName: string): T[] {
   const parsed = Papa.parse<T>(content, {
@@ -140,6 +184,9 @@ function wheelchairLabel(value: string | undefined): "yes" | "no" | "unknown" {
 }
 
 async function loadTtcStaticDataset(): Promise<TtcStaticDataset> {
+  const edgeCached = await loadFromEdgeCache();
+  if (edgeCached) return edgeCached;
+
   const response = await fetch(ttcCompleteGtfsSource.url);
 
   if (!response.ok) {
@@ -225,13 +272,18 @@ async function loadTtcStaticDataset(): Promise<TtcStaticDataset> {
 
   const stopsById = new Map(stops.map((stop) => [stop.stopId, stop]));
 
-  return {
+  const dataset: TtcStaticDataset = {
     fetchedAt: new Date().toISOString(),
     stops,
     stopsById,
     routesById,
     tripsById
   };
+
+  // Populate edge cache in the background so this request isn't delayed
+  void saveToEdgeCache(dataset);
+
+  return dataset;
 }
 
 export async function getTtcStaticDataset() {
