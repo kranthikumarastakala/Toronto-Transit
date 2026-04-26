@@ -2,6 +2,7 @@ name = "transitly"
 main = "src/index.ts"
 compatibility_date = "2026-04-12"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = true
 
 [observability]
 enabled = true
