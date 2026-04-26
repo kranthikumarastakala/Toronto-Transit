@@ -10,15 +10,23 @@ import {
   getTtcVehiclePositions,
   searchTtcStops
 } from "./ttc";
+import { initKv, refreshGtfsToKv } from "./ttc-static";
 import { transitSources } from "./transit-sources";
 
 type Env = {
   Bindings: {
     GO_OPEN_DATA_API_KEY?: string;
+    TRANSIT_DATA: KVNamespace;
   };
 };
 
 const app = new Hono<Env>();
+
+// Initialise the KV binding for this isolate on every request
+app.use("*", async (c, next) => {
+  initKv(c.env.TRANSIT_DATA);
+  await next();
+});
 
 function parseNumberQuery(value: string | undefined) {
   if (!value) {
@@ -55,6 +63,11 @@ app.get("/api/health", (c) => {
       "Cache-Control": "no-store"
     }
   );
+});
+
+app.get("/api/admin/warm", async (c) => {
+  c.executionCtx.waitUntil(refreshGtfsToKv());
+  return c.json({ status: "warming", message: "GTFS refresh triggered in background. Check /api/ttc/stops/nearby in ~3 minutes." }, 202);
 });
 
 app.get("/api/transit/sources", (c) => {
@@ -262,4 +275,12 @@ app.notFound((c) => {
   );
 });
 
-export default app;
+type EnvBindings = Env["Bindings"];
+
+export default {
+  fetch: app.fetch,
+  async scheduled(_event: ScheduledEvent, env: EnvBindings, ctx: ExecutionContext) {
+    initKv(env.TRANSIT_DATA);
+    ctx.waitUntil(refreshGtfsToKv());
+  }
+};

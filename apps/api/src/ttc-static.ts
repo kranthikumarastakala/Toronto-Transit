@@ -70,11 +70,18 @@ export type TtcStaticDataset = {
 };
 
 const STATIC_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const EDGE_CACHE_KEY = "https://ttc-internal-cache/static-dataset/v1";
-const EDGE_CACHE_TTL_SECONDS = 6 * 60 * 60;
+const KV_DATASET_KEY = "ttc-static-dataset-v1";
 
-let staticDatasetPromise: Promise<TtcStaticDataset> | null = null;
-let staticDatasetExpiresAt = 0;
+// Module-level in-memory cache (warm for the lifetime of this isolate)
+let cachedDataset: TtcStaticDataset | null = null;
+let cacheExpiresAt = 0;
+
+// KV binding — set once per isolate via initKv()
+let _kv: KVNamespace | null = null;
+
+export function initKv(kv: KVNamespace): void {
+  _kv = kv;
+}
 
 type SerializedDataset = {
   fetchedAt: string;
@@ -83,39 +90,20 @@ type SerializedDataset = {
   trips: TtcTrip[];
 };
 
-async function loadFromEdgeCache(): Promise<TtcStaticDataset | null> {
-  try {
-    const cache = await caches.open("ttc-static");
-    const cached = await cache.match(new Request(EDGE_CACHE_KEY));
-    if (!cached) return null;
-    const data = (await cached.json()) as SerializedDataset;
-    const stopsById = new Map(data.stops.map((s) => [s.stopId, s]));
-    const routesById = new Map(data.routes.map((r) => [r.routeId, r]));
-    const tripsById = new Map(data.trips.map((t) => [t.tripId, t]));
-    return { fetchedAt: data.fetchedAt, stops: data.stops, stopsById, routesById, tripsById };
-  } catch {
-    return null;
-  }
+function deserialize(data: SerializedDataset): TtcStaticDataset {
+  const stopsById = new Map(data.stops.map((s) => [s.stopId, s]));
+  const routesById = new Map(data.routes.map((r) => [r.routeId, r]));
+  const tripsById = new Map(data.trips.map((t) => [t.tripId, t]));
+  return { fetchedAt: data.fetchedAt, stops: data.stops, stopsById, routesById, tripsById };
 }
 
-async function saveToEdgeCache(dataset: TtcStaticDataset): Promise<void> {
-  try {
-    const cache = await caches.open("ttc-static");
-    const payload: SerializedDataset = {
-      fetchedAt: dataset.fetchedAt,
-      stops: dataset.stops,
-      routes: Array.from(dataset.routesById.values()),
-      trips: Array.from(dataset.tripsById.values())
-    };
-    await cache.put(
-      new Request(EDGE_CACHE_KEY),
-      new Response(JSON.stringify(payload), {
-        headers: { "Cache-Control": `public, max-age=${EDGE_CACHE_TTL_SECONDS}`, "Content-Type": "application/json" }
-      })
-    );
-  } catch {
-    // ignore cache write failures — in-memory cache still works
-  }
+function serialize(dataset: TtcStaticDataset): SerializedDataset {
+  return {
+    fetchedAt: dataset.fetchedAt,
+    stops: dataset.stops,
+    routes: Array.from(dataset.routesById.values()),
+    trips: Array.from(dataset.tripsById.values())
+  };
 }
 
 function parseCsvRows<T>(content: string, fileName: string): T[] {
@@ -184,9 +172,6 @@ function wheelchairLabel(value: string | undefined): "yes" | "no" | "unknown" {
 }
 
 async function loadTtcStaticDataset(): Promise<TtcStaticDataset> {
-  const edgeCached = await loadFromEdgeCache();
-  if (edgeCached) return edgeCached;
-
   const response = await fetch(ttcCompleteGtfsSource.url);
 
   if (!response.ok) {
@@ -280,27 +265,46 @@ async function loadTtcStaticDataset(): Promise<TtcStaticDataset> {
     tripsById
   };
 
-  // Populate edge cache in the background so this request isn't delayed
-  void saveToEdgeCache(dataset);
-
   return dataset;
 }
 
-export async function getTtcStaticDataset() {
-  const now = Date.now();
+// Called by the cron trigger (scheduled handler) — downloads GTFS, stores in KV + memory.
+// Never called on the HTTP request path.
+export async function refreshGtfsToKv(): Promise<void> {
+  const dataset = await loadTtcStaticDataset();
 
-  if (staticDatasetPromise && now < staticDatasetExpiresAt) {
-    return staticDatasetPromise;
+  if (_kv) {
+    await _kv.put(KV_DATASET_KEY, JSON.stringify(serialize(dataset)), {
+      expirationTtl: STATIC_CACHE_TTL_MS / 1000
+    });
   }
 
-  staticDatasetPromise = loadTtcStaticDataset().catch((error) => {
-    staticDatasetPromise = null;
-    staticDatasetExpiresAt = 0;
-    throw error;
-  });
-  staticDatasetExpiresAt = now + STATIC_CACHE_TTL_MS;
+  cachedDataset = dataset;
+  cacheExpiresAt = Date.now() + STATIC_CACHE_TTL_MS;
+}
 
-  return staticDatasetPromise;
+// Called on every API request — reads in-memory cache first, then KV, never downloads.
+export async function getTtcStaticDataset(): Promise<TtcStaticDataset> {
+  const now = Date.now();
+
+  // 1. In-memory (fastest — same isolate)
+  if (cachedDataset && now < cacheExpiresAt) {
+    return cachedDataset;
+  }
+
+  // 2. KV (fast — no HTTP download)
+  if (_kv) {
+    const raw = await _kv.get(KV_DATASET_KEY, "text");
+    if (raw) {
+      const dataset = deserialize(JSON.parse(raw) as SerializedDataset);
+      cachedDataset = dataset;
+      cacheExpiresAt = now + STATIC_CACHE_TTL_MS;
+      return dataset;
+    }
+  }
+
+  // 3. KV not yet populated — cron hasn't run yet
+  throw new Error("TTC static data not yet available. Please try again in a few minutes.");
 }
 
 export function toPublicStop(stop: TtcStop) {

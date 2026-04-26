@@ -4,5 +4,12 @@ compatibility_date = "2026-04-12"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
+[triggers]
+crons = ["0 */6 * * *"]
+
+[[kv_namespaces]]
+binding = "TRANSIT_DATA"
+id = "777642f3980d4de79f49018d0a6cf8b9"
+
 [observability]
 enabled = true
