@@ -511,6 +511,68 @@ function OptionChip({
   );
 }
 
+// ─── Stop picker ─────────────────────────────────────────────────────────────
+function StopPicker({
+  stops,
+  selectedIdx,
+  onSelect
+}: {
+  stops: Array<{ stopId: string; stopName: string; distanceMeters?: number }>;
+  selectedIdx: number;
+  onSelect: (idx: number) => void;
+}) {
+  return (
+    <div style={{ marginTop: 4 }}>
+      <div className="signalto-list-label mb-1" style={{ fontSize: "0.68rem" }}>
+        Board at
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {stops.map((stop, idx) => (
+          <button
+            key={stop.stopId}
+            type="button"
+            onClick={() => onSelect(idx)}
+            style={{
+              all: "unset",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "5px 8px",
+              borderRadius: 8,
+              background: idx === selectedIdx ? "rgba(15,91,82,0.09)" : "transparent",
+              border: `1.5px solid ${idx === selectedIdx ? "rgba(15,91,82,0.3)" : "transparent"}`,
+              cursor: "pointer",
+              fontSize: "0.78rem"
+            }}
+          >
+            <i
+              className={idx === selectedIdx ? "bi bi-record-circle-fill" : "bi bi-circle"}
+              style={{ color: idx === selectedIdx ? "#0f5b52" : "#bbb", fontSize: "0.75rem", flexShrink: 0 }}
+              aria-hidden="true"
+            />
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontWeight: idx === selectedIdx ? 600 : 400,
+                  color: idx === selectedIdx ? "#0f5b52" : "var(--signalto-ink)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                {stop.stopName}
+              </div>
+              {stop.distanceMeters != null && (
+                <div style={{ fontSize: "0.68rem", color: "#888" }}>{stop.distanceMeters} m away</div>
+              )}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main panel ───────────────────────────────────────────────────────────────
 type Props = {
   /** If NearbyStops pushes a stop, it's provided here */
@@ -536,6 +598,12 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
       : null
   );
   const [selectedOptionIdx, setSelectedOptionIdx] = useState(0);
+  const [selectedOriginStopIdx, setSelectedOriginStopIdx] = useState(0);
+  const [selectedDestStopIdx, setSelectedDestStopIdx] = useState(0);
+
+  // Reset stop selection whenever the address changes
+  useEffect(() => { setSelectedOriginStopIdx(0); }, [originPlace]);
+  useEffect(() => { setSelectedDestStopIdx(0); }, [destinationPlace]);
 
   // Sync preset stops when NearbyStops pushes them in
   useEffect(() => {
@@ -588,20 +656,20 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
   // Nearest TTC stops to each address
   const originNearby = useQuery({
     queryKey: ["trip-stops-near-origin", originPlace?.lat, originPlace?.lon],
-    queryFn: () => api.getNearbyTtcStops({ lat: originPlace!.lat, lon: originPlace!.lon, radius: 750, limit: 3 }),
+    queryFn: () => api.getNearbyTtcStops({ lat: originPlace!.lat, lon: originPlace!.lon, radius: 750, limit: 5 }),
     enabled: Boolean(originPlace),
     staleTime: 300_000
   });
 
   const destNearby = useQuery({
     queryKey: ["trip-stops-near-dest", destinationPlace?.lat, destinationPlace?.lon],
-    queryFn: () => api.getNearbyTtcStops({ lat: destinationPlace!.lat, lon: destinationPlace!.lon, radius: 750, limit: 3 }),
+    queryFn: () => api.getNearbyTtcStops({ lat: destinationPlace!.lat, lon: destinationPlace!.lon, radius: 750, limit: 5 }),
     enabled: Boolean(destinationPlace),
     staleTime: 300_000
   });
 
-  const fromStop = originNearby.data?.stops[0] ?? null;
-  const toStop = destNearby.data?.stops[0] ?? null;
+  const fromStop = originNearby.data?.stops[selectedOriginStopIdx] ?? originNearby.data?.stops[0] ?? null;
+  const toStop = destNearby.data?.stops[selectedDestStopIdx] ?? destNearby.data?.stops[0] ?? null;
 
   // Commute evaluation
   const journey = useQuery({
@@ -709,6 +777,15 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
               nearbyStopHint={fromStop?.stopName ?? null}
             />
 
+            {/* Stop picker — shown when place is chosen and multiple nearby stops exist */}
+            {originPlace && (originNearby.data?.stops.length ?? 0) > 1 && (
+              <StopPicker
+                stops={originNearby.data!.stops}
+                selectedIdx={selectedOriginStopIdx}
+                onSelect={setSelectedOriginStopIdx}
+              />
+            )}
+
             <div className="d-flex justify-content-center">
               <button
                 type="button"
@@ -740,6 +817,15 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
               onClear={clearDestination}
               nearbyStopHint={toStop?.stopName ?? null}
             />
+
+            {/* Stop picker */}
+            {destinationPlace && (destNearby.data?.stops.length ?? 0) > 1 && (
+              <StopPicker
+                stops={destNearby.data!.stops}
+                selectedIdx={selectedDestStopIdx}
+                onSelect={setSelectedDestStopIdx}
+              />
+            )}
 
             {/* Status indicators */}
             {originPlace && !fromStop && originNearby.isLoading && (

@@ -360,6 +360,29 @@ function getBoardableStopIds(stopId: string, dataset: Awaited<ReturnType<typeof 
   return childStopIds.length ? childStopIds : [stopId];
 }
 
+/**
+ * Returns all boardable stop IDs within `radiusMeters` of the given stop.
+ * This catches cases where the user selected a bus bay at a subway station —
+ * the subway platform stops are a short distance away with different stop IDs.
+ */
+function expandToNearbyBoardableStops(
+  stopId: string,
+  dataset: Awaited<ReturnType<typeof getTtcStaticDataset>>,
+  radiusMeters = 250
+): string[] {
+  const anchor = dataset.stopsById.get(stopId);
+  if (!anchor) return [];
+
+  return dataset.stops
+    .filter(
+      (s) =>
+        s.stopId !== stopId &&
+        s.locationType === 0 &&
+        haversineMeters(anchor.latitude, anchor.longitude, s.latitude, s.longitude) <= radiusMeters
+    )
+    .map((s) => s.stopId);
+}
+
 function sortDirectCommuteOptions(options: DirectCommuteOption[]) {
   return options
     .sort((left, right) => {
@@ -1257,8 +1280,18 @@ export async function evaluateTtcCommute(fromStopId: string, toStopId: string) {
     console.warn(`[evaluateTtcCommute] No trip snapshots found in realtime feed (${feed.entity?.length ?? 0} entities)`);
   }
   
-  const fromCandidateStopIds = getBoardableStopIds(fromStopId, dataset);
-  const toCandidateStopIds = getBoardableStopIds(toStopId, dataset);
+  const fromCandidateStopIds = Array.from(
+    new Set([
+      ...getBoardableStopIds(fromStopId, dataset),
+      ...expandToNearbyBoardableStops(fromStopId, dataset, 250)
+    ])
+  ).slice(0, 25);
+  const toCandidateStopIds = Array.from(
+    new Set([
+      ...getBoardableStopIds(toStopId, dataset),
+      ...expandToNearbyBoardableStops(toStopId, dataset, 250)
+    ])
+  ).slice(0, 25);
   
   if (fromCandidateStopIds.length === 0) {
     throw new Error(`No boardable stops found for origin ${fromStopId} (${fromStop.stopName})`);
