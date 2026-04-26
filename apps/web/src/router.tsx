@@ -206,6 +206,13 @@ function DashboardPage() {
   }, [originArrivals.data, originStop, notifPermission]);
 
   useEffect(() => {
+    if (navigator.geolocation) {
+      requestBrowserLocation();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     if (!selectedStopId) {
       setSelectedStopId(originStop?.stopId ?? nearbyStops.data?.stops[0]?.stopId ?? null);
     }
