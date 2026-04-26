@@ -568,6 +568,23 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
     staleTime: 60_000
   });
 
+  // Auto-select when exactly one suggestion comes back
+  useEffect(() => {
+    if (!originPlace && originSuggestions.data?.length === 1) {
+      const place = originSuggestions.data[0];
+      setOriginPlace(place);
+      setOriginInput(place.name);
+    }
+  }, [originSuggestions.data]);
+
+  useEffect(() => {
+    if (!destinationPlace && destSuggestions.data?.length === 1) {
+      const place = destSuggestions.data[0];
+      setDestinationPlace(place);
+      setDestinationInput(place.name);
+    }
+  }, [destSuggestions.data]);
+
   // Nearest TTC stops to each address
   const originNearby = useQuery({
     queryKey: ["trip-stops-near-origin", originPlace?.lat, originPlace?.lon],

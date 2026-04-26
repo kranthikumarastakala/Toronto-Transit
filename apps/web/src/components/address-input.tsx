@@ -73,6 +73,13 @@ export function AddressInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => setFocused(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && suggestions.length > 0 && !selectedPlace) {
+              e.preventDefault();
+              onSelect(suggestions[0]);
+              setFocused(false);
+            }
+          }}
           placeholder={placeholder}
           className="form-control signalto-input"
           autoComplete="off"
