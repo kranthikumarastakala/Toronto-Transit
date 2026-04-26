@@ -798,7 +798,19 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
             <div className="alert alert-danger rounded-4 border-0 mb-0">{errorMsg}</div>
           ) : !selectedOption ? (
             <div className="signalto-note p-4 signalto-subtle">
-              No TTC trips found for this route right now. Routes between some stops may have no active service at this time.
+              <div className="mb-2">No TTC service found between these stops right now.</div>
+              <div className="small mb-3" style={{ opacity: 0.75 }}>
+                This app covers TTC only (bus, streetcar, subway). Your route may require GO Transit, UP Express, or a connection not on TTC.
+              </div>
+              <a
+                href={`https://www.triplinx.ca/en/trip-planner`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="small"
+                style={{ color: "#0f5b52" }}
+              >
+                Try Triplinx for multi-agency routing →
+              </a>
             </div>
           ) : (
             <div
