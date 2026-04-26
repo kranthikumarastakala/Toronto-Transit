@@ -17,11 +17,12 @@ import {
   type PhotonFeature,
   type TtcCommuteEvaluationResponse,
   type TtcCommuteOption,
+  type TtcNearbyStop,
   type TtcStop,
   type TtcTransferCommuteOption
 } from "../lib/api";
 import { haversineMeters, walkMinutes, formatWalkLabel } from "../lib/geo-utils";
-import { AddressInput } from "./address-input";
+import { JourneyEndpointInput, type SelectedEndpoint, saveRecentStop } from "./address-input";
 import { SectionHeader } from "./section-header";
 import { formatTimestamp } from "../lib/format-utils";
 
@@ -511,68 +512,6 @@ function OptionChip({
   );
 }
 
-// ─── Stop picker ─────────────────────────────────────────────────────────────
-function StopPicker({
-  stops,
-  selectedIdx,
-  onSelect
-}: {
-  stops: Array<{ stopId: string; stopName: string; distanceMeters?: number }>;
-  selectedIdx: number;
-  onSelect: (idx: number) => void;
-}) {
-  return (
-    <div style={{ marginTop: 4 }}>
-      <div className="signalto-list-label mb-1" style={{ fontSize: "0.68rem" }}>
-        Board at
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        {stops.map((stop, idx) => (
-          <button
-            key={stop.stopId}
-            type="button"
-            onClick={() => onSelect(idx)}
-            style={{
-              all: "unset",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "5px 8px",
-              borderRadius: 8,
-              background: idx === selectedIdx ? "rgba(15,91,82,0.09)" : "transparent",
-              border: `1.5px solid ${idx === selectedIdx ? "rgba(15,91,82,0.3)" : "transparent"}`,
-              cursor: "pointer",
-              fontSize: "0.78rem"
-            }}
-          >
-            <i
-              className={idx === selectedIdx ? "bi bi-record-circle-fill" : "bi bi-circle"}
-              style={{ color: idx === selectedIdx ? "#0f5b52" : "#bbb", fontSize: "0.75rem", flexShrink: 0 }}
-              aria-hidden="true"
-            />
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontWeight: idx === selectedIdx ? 600 : 400,
-                  color: idx === selectedIdx ? "#0f5b52" : "var(--signalto-ink)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap"
-                }}
-              >
-                {stop.stopName}
-              </div>
-              {stop.distanceMeters != null && (
-                <div style={{ fontSize: "0.68rem", color: "#888" }}>{stop.distanceMeters} m away</div>
-              )}
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ─── Main panel ───────────────────────────────────────────────────────────────
 type Props = {
   /** If NearbyStops pushes a stop, it's provided here */
@@ -582,94 +521,102 @@ type Props = {
   onStopsResolved?: (from: TtcStop | null, to: TtcStop | null) => void;
   /** User's GPS location label */
   locationLabel?: string;
+  /** Nearby stops from user's GPS (shown in From dropdown when empty) */
+  userNearbyStops?: TtcNearbyStop[];
+  /** Called when user taps "Use my location" inside the From dropdown */
+  onUseMyLocation?: () => void;
 };
 
-export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onStopsResolved, locationLabel }: Props) {
+export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onStopsResolved, locationLabel, userNearbyStops = [], onUseMyLocation }: Props) {
   const [originInput, setOriginInput] = useState(presetOriginStop?.stopName ?? "");
   const [destinationInput, setDestinationInput] = useState(presetDestinationStop?.stopName ?? "");
-  const [originPlace, setOriginPlace] = useState<PhotonFeature | null>(
-    presetOriginStop
-      ? { lat: presetOriginStop.latitude, lon: presetOriginStop.longitude, name: presetOriginStop.stopName, street: null, housenumber: null, city: "Toronto", state: "Ontario", type: "stop" }
-      : null
+  const [originEndpoint, setOriginEndpoint] = useState<SelectedEndpoint | null>(
+    presetOriginStop ? { kind: "stop", stop: presetOriginStop } : null
   );
-  const [destinationPlace, setDestinationPlace] = useState<PhotonFeature | null>(
-    presetDestinationStop
-      ? { lat: presetDestinationStop.latitude, lon: presetDestinationStop.longitude, name: presetDestinationStop.stopName, street: null, housenumber: null, city: "Toronto", state: "Ontario", type: "stop" }
-      : null
+  const [destinationEndpoint, setDestinationEndpoint] = useState<SelectedEndpoint | null>(
+    presetDestinationStop ? { kind: "stop", stop: presetDestinationStop } : null
   );
   const [selectedOptionIdx, setSelectedOptionIdx] = useState(0);
-  const [selectedOriginStopIdx, setSelectedOriginStopIdx] = useState(0);
-  const [selectedDestStopIdx, setSelectedDestStopIdx] = useState(0);
 
-  // Reset stop selection whenever the address changes
-  useEffect(() => { setSelectedOriginStopIdx(0); }, [originPlace]);
-  useEffect(() => { setSelectedDestStopIdx(0); }, [destinationPlace]);
-
-  // Sync preset stops when NearbyStops pushes them in
+  // Sync preset stops pushed in from NearbyStops panel
   useEffect(() => {
     if (!presetOriginStop) return;
+    setOriginEndpoint({ kind: "stop", stop: presetOriginStop });
     setOriginInput(presetOriginStop.stopName);
-    setOriginPlace({ lat: presetOriginStop.latitude, lon: presetOriginStop.longitude, name: presetOriginStop.stopName, street: null, housenumber: null, city: "Toronto", state: "Ontario", type: "stop" });
+    saveRecentStop(presetOriginStop);
   }, [presetOriginStop?.stopId]);
 
   useEffect(() => {
     if (!presetDestinationStop) return;
+    setDestinationEndpoint({ kind: "stop", stop: presetDestinationStop });
     setDestinationInput(presetDestinationStop.stopName);
-    setDestinationPlace({ lat: presetDestinationStop.latitude, lon: presetDestinationStop.longitude, name: presetDestinationStop.stopName, street: null, housenumber: null, city: "Toronto", state: "Ontario", type: "stop" });
+    saveRecentStop(presetDestinationStop);
   }, [presetDestinationStop?.stopId]);
 
-  const debouncedOriginQuery = useDebounce(originInput.trim(), 200);
-  const debouncedDestQuery = useDebounce(destinationInput.trim(), 200);
+  const debouncedOriginQuery = useDebounce(originInput.trim(), 180);
+  const debouncedDestQuery = useDebounce(destinationInput.trim(), 180);
 
-  // Photon autocomplete for each field
-  const originSuggestions = useQuery({
+  const isOriginTyping = debouncedOriginQuery.length >= 2 && !originEndpoint;
+  const isDestTyping = debouncedDestQuery.length >= 2 && !destinationEndpoint;
+
+  // TTC stop name search (primary for transit users)
+  const originStopSearch = useQuery({
+    queryKey: ["stop-search-origin", debouncedOriginQuery],
+    queryFn: () => api.searchTtcStops(debouncedOriginQuery, 8),
+    enabled: isOriginTyping,
+    staleTime: 120_000,
+  });
+
+  const destStopSearch = useQuery({
+    queryKey: ["stop-search-dest", debouncedDestQuery],
+    queryFn: () => api.searchTtcStops(debouncedDestQuery, 8),
+    enabled: isDestTyping,
+    staleTime: 120_000,
+  });
+
+  // Photon address autocomplete (secondary, for street addresses)
+  const originAddressSuggestions = useQuery({
     queryKey: ["photon-origin", debouncedOriginQuery],
     queryFn: () => photonAutocomplete(debouncedOriginQuery),
-    enabled: debouncedOriginQuery.length >= 2 && !originPlace,
-    staleTime: 60_000
+    enabled: isOriginTyping,
+    staleTime: 60_000,
   });
 
-  const destSuggestions = useQuery({
+  const destAddressSuggestions = useQuery({
     queryKey: ["photon-dest", debouncedDestQuery],
     queryFn: () => photonAutocomplete(debouncedDestQuery),
-    enabled: debouncedDestQuery.length >= 2 && !destinationPlace,
-    staleTime: 60_000
+    enabled: isDestTyping,
+    staleTime: 60_000,
   });
 
-  // Auto-select when exactly one suggestion comes back
-  useEffect(() => {
-    if (!originPlace && originSuggestions.data?.length === 1) {
-      const place = originSuggestions.data[0];
-      setOriginPlace(place);
-      setOriginInput(place.name);
-    }
-  }, [originSuggestions.data]);
+  // Nearest TTC stops to a geocoded address endpoint
+  const originPlace = originEndpoint?.kind === "address" ? originEndpoint.place : null;
+  const destinationPlace = destinationEndpoint?.kind === "address" ? destinationEndpoint.place : null;
 
-  useEffect(() => {
-    if (!destinationPlace && destSuggestions.data?.length === 1) {
-      const place = destSuggestions.data[0];
-      setDestinationPlace(place);
-      setDestinationInput(place.name);
-    }
-  }, [destSuggestions.data]);
-
-  // Nearest TTC stops to each address
   const originNearby = useQuery({
     queryKey: ["trip-stops-near-origin", originPlace?.lat, originPlace?.lon],
     queryFn: () => api.getNearbyTtcStops({ lat: originPlace!.lat, lon: originPlace!.lon, radius: 750, limit: 5 }),
     enabled: Boolean(originPlace),
-    staleTime: 300_000
+    staleTime: 300_000,
   });
 
   const destNearby = useQuery({
     queryKey: ["trip-stops-near-dest", destinationPlace?.lat, destinationPlace?.lon],
     queryFn: () => api.getNearbyTtcStops({ lat: destinationPlace!.lat, lon: destinationPlace!.lon, radius: 750, limit: 5 }),
     enabled: Boolean(destinationPlace),
-    staleTime: 300_000
+    staleTime: 300_000,
   });
 
-  const fromStop = originNearby.data?.stops[selectedOriginStopIdx] ?? originNearby.data?.stops[0] ?? null;
-  const toStop = destNearby.data?.stops[selectedDestStopIdx] ?? destNearby.data?.stops[0] ?? null;
+  // Resolve the actual TTC stop that will be used
+  const fromStop: TtcStop | null =
+    originEndpoint?.kind === "stop"
+      ? originEndpoint.stop
+      : (originNearby.data?.stops[0] ?? null);
+
+  const toStop: TtcStop | null =
+    destinationEndpoint?.kind === "stop"
+      ? destinationEndpoint.stop
+      : (destNearby.data?.stops[0] ?? null);
 
   // Commute evaluation
   const journey = useQuery({
@@ -680,14 +627,14 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
   });
 
   // Walk distances (haversine on frontend)
-  // If originPlace.type === "stop" the user is already at the stop → walk = 0
+  // If endpoint.kind === "stop" the user selected the stop directly → walk = 0
   const walkInMeters =
-    originPlace && fromStop && originPlace.type !== "stop"
-      ? haversineMeters(originPlace.lat, originPlace.lon, fromStop.latitude, fromStop.longitude)
+    originEndpoint?.kind === "address" && fromStop
+      ? haversineMeters(originEndpoint.place.lat, originEndpoint.place.lon, fromStop.latitude, fromStop.longitude)
       : 0;
   const walkOutMeters =
-    destinationPlace && toStop && destinationPlace.type !== "stop"
-      ? haversineMeters(toStop.latitude, toStop.longitude, destinationPlace.lat, destinationPlace.lon)
+    destinationEndpoint?.kind === "address" && toStop
+      ? haversineMeters(toStop.latitude, toStop.longitude, destinationEndpoint.place.lat, destinationEndpoint.place.lon)
       : 0;
 
   // Notify parent of resolved stops
@@ -710,30 +657,37 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
   }, [ev?.generatedAt]);
 
   function clearOrigin() {
-    setOriginPlace(null);
+    setOriginEndpoint(null);
     setOriginInput("");
   }
 
   function clearDestination() {
-    setDestinationPlace(null);
+    setDestinationEndpoint(null);
     setDestinationInput("");
   }
 
   function swapPlaces() {
-    const tempPlace = originPlace;
+    const tempEndpoint = originEndpoint;
     const tempInput = originInput;
-    setOriginPlace(destinationPlace);
+    setOriginEndpoint(destinationEndpoint);
     setOriginInput(destinationInput);
-    setDestinationPlace(tempPlace);
+    setDestinationEndpoint(tempEndpoint);
     setDestinationInput(tempInput);
   }
 
-  const originLabel =
-    originPlace ? (originPlace.name + (originPlace.street && originPlace.street !== originPlace.name ? `, ${originPlace.street}` : "")) : "Origin";
-  const destinationLabel =
-    destinationPlace ? (destinationPlace.name + (destinationPlace.street && destinationPlace.street !== destinationPlace.name ? `, ${destinationPlace.street}` : "")) : "Destination";
+  function formatEndpointLabel(ep: SelectedEndpoint | null, fallback: string): string {
+    if (!ep) return fallback;
+    if (ep.kind === "stop") return ep.stop.stopName;
+    const parts: string[] = [];
+    if (ep.place.housenumber) parts.push(ep.place.housenumber);
+    if (ep.place.street) parts.push(ep.place.street);
+    return parts.join(" ") || ep.place.name;
+  }
 
-  const isSearching = Boolean(originPlace && destinationPlace && fromStop && toStop);
+  const originLabel = formatEndpointLabel(originEndpoint, "Origin");
+  const destinationLabel = formatEndpointLabel(destinationEndpoint, "Destination");
+
+  const isSearching = Boolean(originEndpoint && destinationEndpoint && fromStop && toStop);
   const selectedOption = allOptions[selectedOptionIdx] ?? allOptions[0] ?? null;
   const errorMsg =
     journey.error instanceof Error ? journey.error.message : "Unable to find TTC trips for this route right now.";
@@ -754,107 +708,101 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
       />
 
       <div className="row g-4">
-        {/* ── Left: Address inputs ── */}
+        {/* ── Left: Endpoint inputs ── */}
         <div className="col-lg-4">
-          <div className="d-grid gap-2">
-            <AddressInput
-              id="journey-from"
-              label="From"
-              placeholder="Enter an address or landmark"
-              value={originInput}
-              selectedPlace={originPlace}
-              suggestions={originSuggestions.data ?? []}
-              isLoading={originSuggestions.isLoading}
-              onChange={(v) => {
-                setOriginInput(v);
-                if (originPlace && v !== originPlace.name) setOriginPlace(null);
-              }}
-              onSelect={(place) => {
-                setOriginPlace(place);
-                setOriginInput(place.name);
-              }}
-              onClear={clearOrigin}
-              nearbyStopHint={fromStop?.stopName ?? null}
-            />
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
 
-            {/* Stop picker — shown when place is chosen and multiple nearby stops exist */}
-            {originPlace && (originNearby.data?.stops.length ?? 0) > 1 && (
-              <StopPicker
-                stops={originNearby.data!.stops}
-                selectedIdx={selectedOriginStopIdx}
-                onSelect={setSelectedOriginStopIdx}
-              />
-            )}
+            {/* ── Journey planner track layout ── */}
+            <div style={{ display: "flex", gap: 10 }}>
+              {/* Track line connecting From → To */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 28, paddingBottom: 2, flexShrink: 0 }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#0f5b52", border: "2.5px solid white", boxShadow: "0 0 0 2px #0f5b52" }} />
+                <div style={{ width: 2, flex: 1, minHeight: 20, background: "linear-gradient(to bottom, #0f5b52, #e77049)", margin: "4px 0", borderRadius: 1, opacity: 0.4 }} />
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#e77049", border: "2.5px solid white", boxShadow: "0 0 0 2px #e77049" }} />
+              </div>
 
-            <div className="d-flex justify-content-center">
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                <JourneyEndpointInput
+                  id="journey-from"
+                  label="From"
+                  placeholder="Station, stop, or address…"
+                  inputValue={originInput}
+                  selected={originEndpoint}
+                  stopResults={originStopSearch.data?.stops ?? []}
+                  addressResults={originAddressSuggestions.data ?? []}
+                  nearbyStops={userNearbyStops}
+                  resolvedStop={originNearby.data?.stops[0] ?? null}
+                  isLoadingStops={originStopSearch.isFetching}
+                  isLoadingAddresses={originAddressSuggestions.isFetching}
+                  onChange={(v) => {
+                    setOriginInput(v);
+                    if (originEndpoint && v !== (originEndpoint.kind === "stop" ? originEndpoint.stop.stopName : "")) setOriginEndpoint(null);
+                  }}
+                  onSelectStop={(stop) => { setOriginEndpoint({ kind: "stop", stop }); setOriginInput(stop.stopName); }}
+                  onSelectAddress={(place) => { setOriginEndpoint({ kind: "address", place }); setOriginInput(place.name); }}
+                  onClear={clearOrigin}
+                  locationShortcut={onUseMyLocation ? { label: locationLabel ?? "Use my location", onUse: onUseMyLocation } : null}
+                  accentColor="#0f5b52"
+                />
+
+                <JourneyEndpointInput
+                  id="journey-to"
+                  label="Destination"
+                  placeholder="Station, stop, or address…"
+                  inputValue={destinationInput}
+                  selected={destinationEndpoint}
+                  stopResults={destStopSearch.data?.stops ?? []}
+                  addressResults={destAddressSuggestions.data ?? []}
+                  nearbyStops={[]}
+                  resolvedStop={destNearby.data?.stops[0] ?? null}
+                  isLoadingStops={destStopSearch.isFetching}
+                  isLoadingAddresses={destAddressSuggestions.isFetching}
+                  onChange={(v) => {
+                    setDestinationInput(v);
+                    if (destinationEndpoint && v !== (destinationEndpoint.kind === "stop" ? destinationEndpoint.stop.stopName : "")) setDestinationEndpoint(null);
+                  }}
+                  onSelectStop={(stop) => { setDestinationEndpoint({ kind: "stop", stop }); setDestinationInput(stop.stopName); }}
+                  onSelectAddress={(place) => { setDestinationEndpoint({ kind: "address", place }); setDestinationInput(place.name); }}
+                  onClear={clearDestination}
+                  accentColor="#e77049"
+                />
+              </div>
+            </div>
+
+            {/* Swap + loading hints */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <button
                 type="button"
                 onClick={swapPlaces}
-                className="btn signalto-btn-ghost rounded-pill px-3 py-1 small fw-semibold"
-                disabled={!originPlace && !destinationPlace}
+                className="btn signalto-btn-ghost btn-sm rounded-pill px-3 fw-semibold"
+                disabled={!originEndpoint && !destinationEndpoint}
+                style={{ fontSize: "0.78rem" }}
               >
-                <i className="bi bi-arrow-down-up me-2" aria-hidden="true" />
+                <i className="bi bi-arrow-down-up me-1" aria-hidden="true" />
                 Swap
               </button>
+              {originEndpoint?.kind === "address" && originNearby.isLoading && (
+                <span style={{ fontSize: "0.72rem", color: "rgba(16,34,51,0.45)", display: "flex", alignItems: "center", gap: 5 }}>
+                  <i className="bi bi-arrow-repeat transitly-spin" aria-hidden="true" />
+                  Finding nearest stop…
+                </span>
+              )}
             </div>
 
-            <AddressInput
-              id="journey-to"
-              label="Destination"
-              placeholder="Enter an address or landmark"
-              value={destinationInput}
-              selectedPlace={destinationPlace}
-              suggestions={destSuggestions.data ?? []}
-              isLoading={destSuggestions.isLoading}
-              onChange={(v) => {
-                setDestinationInput(v);
-                if (destinationPlace && v !== destinationPlace.name) setDestinationPlace(null);
-              }}
-              onSelect={(place) => {
-                setDestinationPlace(place);
-                setDestinationInput(place.name);
-              }}
-              onClear={clearDestination}
-              nearbyStopHint={toStop?.stopName ?? null}
-            />
-
-            {/* Stop picker */}
-            {destinationPlace && (destNearby.data?.stops.length ?? 0) > 1 && (
-              <StopPicker
-                stops={destNearby.data!.stops}
-                selectedIdx={selectedDestStopIdx}
-                onSelect={setSelectedDestStopIdx}
-              />
-            )}
-
-            {/* Status indicators */}
-            {originPlace && !fromStop && originNearby.isLoading && (
-              <div className="signalto-note p-2 small signalto-subtle">
-                <i className="bi bi-search me-1" aria-hidden="true" />
-                Finding nearest TTC stop…
-              </div>
-            )}
-            {originPlace && !fromStop && !originNearby.isLoading && (
+            {/* No stops near address warning */}
+            {originEndpoint?.kind === "address" && !fromStop && !originNearby.isLoading && (
               <div className="alert alert-warning rounded-3 border-0 mb-0 small py-2">
                 No TTC stops found near that address. Try a more central location.
               </div>
             )}
 
-            {/* Options selector (compact chips — shown once results arrive) */}
+            {/* Options selector */}
             {allOptions.length > 0 && (
-              <div className="mt-2">
+              <div className="mt-1">
                 <div className="signalto-list-label mb-2">
                   {allOptions.length} option{allOptions.length !== 1 ? "s" : ""} available
                 </div>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    overflowX: "auto",
-                    paddingBottom: 4,
-                    scrollbarWidth: "thin"
-                  }}
-                >
+                <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, scrollbarWidth: "thin" }}>
                   {allOptions.map((opt, i) => (
                     <OptionChip
                       key={i}
@@ -870,14 +818,9 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
 
             {/* Recommendation headline */}
             {ev && (
-              <div
-                className="rounded-3 p-3 mt-1 small"
-                style={{ background: "rgba(15,91,82,0.07)", color: "#0f5b52" }}
-              >
+              <div className="rounded-3 p-3 small" style={{ background: "rgba(15,91,82,0.07)", color: "#0f5b52" }}>
                 <div className="fw-semibold">{ev.recommendation.headline}</div>
-                <div className="mt-1" style={{ color: "#555", fontSize: "0.78rem" }}>
-                  {ev.recommendation.detail}
-                </div>
+                <div className="mt-1" style={{ color: "#555", fontSize: "0.78rem" }}>{ev.recommendation.detail}</div>
               </div>
             )}
           </div>

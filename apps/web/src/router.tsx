@@ -265,6 +265,8 @@ function DashboardPage() {
             presetDestinationStop={presetDestinationStop ?? undefined}
             onStopsResolved={handleStopsResolved}
             locationLabel={locationStatus === "ready" ? "Your live location" : undefined}
+            userNearbyStops={nearbyStops.data?.stops ?? []}
+            onUseMyLocation={requestBrowserLocation}
           />
         </div>
       </section>
