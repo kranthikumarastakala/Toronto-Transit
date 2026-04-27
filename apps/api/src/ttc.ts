@@ -1,5 +1,6 @@
 import GtfsRealtimeBindings from "gtfs-realtime-bindings";
-import { getTtcStaticDataset, toPublicStop } from "./ttc-static";
+import { getTtcStaticDataset, getTtcSubwaySchedule, toPublicStop } from "./ttc-static";
+import type { TtcSubwaySchedule, SubwayScheduledTrip } from "./ttc-static";
 import { ttcAlertSource, ttcTripUpdateSource, ttcVehicleSource } from "./transit-sources";
 
 const effectLabels: Record<number, string> = {
@@ -1259,6 +1260,178 @@ function buildTransferOptions(
     .slice(0, 6);
 }
 
+// ─── Static subway schedule fallback ──────────────────────────────────────────
+// TTC subway (Line 1, Line 2) is NOT in the GTFS-RT feed, so we fall back to
+// the static GTFS stop_times to show upcoming scheduled departures.
+
+/**
+ * Converts a GTFS departure_time string (e.g. "25:30:00") to seconds since midnight.
+ * Values > 86400 represent post-midnight service on the same GTFS service day.
+ */
+function parseGtfsTime(s: string): number | null {
+  const parts = s.split(":");
+  if (parts.length < 3) return null;
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const sec = parseInt(parts[2], 10);
+  if (!Number.isFinite(h) || !Number.isFinite(m) || !Number.isFinite(sec)) return null;
+  return h * 3600 + m * 60 + sec;
+}
+
+/** Returns YYYYMMDD string for a given UTC timestamp, adjusted to Toronto local time. */
+function torontoDateStr(unixMs: number): string {
+  return new Date(unixMs).toLocaleDateString("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).replace(/-/g, "");
+}
+
+/** Returns the day-of-week index (0=Sun, 1=Mon … 6=Sat) for a Toronto local date. */
+function torontoDayOfWeek(unixMs: number): number {
+  return new Date(new Date(unixMs).toLocaleString("en-CA", { timeZone: "America/Toronto" })).getDay();
+}
+
+/** Seconds since midnight in Toronto local time for a given Unix ms. */
+function torontoSecondsSinceMidnight(unixMs: number): number {
+  const torontoStr = new Date(unixMs).toLocaleTimeString("en-CA", { timeZone: "America/Toronto", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const parts = torontoStr.split(":");
+  if (parts.length < 3) return 0;
+  return parseInt(parts[0], 10) * 3600 + parseInt(parts[1], 10) * 60 + parseInt(parts[2], 10);
+}
+
+const DOW_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
+
+function getActiveServiceIds(schedule: TtcSubwaySchedule, nowMs: number): Set<string> {
+  // TTC subway late-night (after midnight) runs on the *previous* GTFS service day.
+  // So we check both today and yesterday.
+  const todayDate = torontoDateStr(nowMs);
+  const yesterdayMs = nowMs - 86_400_000;
+  const yesterdayDate = torontoDateStr(yesterdayMs);
+  const active = new Set<string>();
+
+  for (const { dateStr, dayOfWeek } of [
+    { dateStr: todayDate, dayOfWeek: torontoDayOfWeek(nowMs) },
+    { dateStr: yesterdayDate, dayOfWeek: torontoDayOfWeek(yesterdayMs) },
+  ]) {
+    const dowKey = DOW_KEYS[dayOfWeek];
+
+    for (const cal of schedule.calendars) {
+      if (!cal.serviceId) continue;
+      if (cal.startDate > dateStr || cal.endDate < dateStr) continue;
+      if (cal[dowKey]) active.add(cal.serviceId);
+    }
+    // Apply exceptions
+    for (const cd of schedule.calendarDates) {
+      if (cd.date !== dateStr) continue;
+      if (cd.exceptionType === 1) active.add(cd.serviceId);
+      if (cd.exceptionType === 2) active.delete(cd.serviceId);
+    }
+  }
+
+  return active;
+}
+
+function buildScheduledSubwayOptions(
+  fromStopIds: string[],
+  toStopIds: string[],
+  schedule: TtcSubwaySchedule,
+  dataset: Awaited<ReturnType<typeof getTtcStaticDataset>>,
+  nowMs: number
+) {
+  const activeServiceIds = getActiveServiceIds(schedule, nowMs);
+
+  // Seconds since local midnight for today AND yesterday (for late-night service)
+  const todaySecSinceMidnight = torontoSecondsSinceMidnight(nowMs);
+  const secSinceMidnightYesterday = todaySecSinceMidnight + 86_400; // 24h offset for previous GTFS day
+
+  const fromSet = new Set(fromStopIds);
+  const toSet = new Set(toStopIds);
+
+  const results: Array<{
+    trip: SubwayScheduledTrip;
+    fromEvent: { stopId: string; departureSeconds: number };
+    toEvent: { stopId: string; departureSeconds: number };
+    minutesUntilDeparture: number;
+  }> = [];
+
+  for (const trip of schedule.trips) {
+    if (!trip.serviceId || !activeServiceIds.has(trip.serviceId)) continue;
+
+    let fromIdx = -1;
+    let toIdx = -1;
+    let fromEvent: { stopId: string; departureSeconds: number } | null = null;
+    let toEvent: { stopId: string; departureSeconds: number } | null = null;
+
+    for (let i = 0; i < trip.stops.length; i++) {
+      const s = trip.stops[i];
+      if (fromIdx === -1 && fromSet.has(s.stopId)) {
+        fromIdx = i;
+        fromEvent = s;
+        continue;
+      }
+      if (fromIdx !== -1 && toSet.has(s.stopId)) {
+        toIdx = i;
+        toEvent = s;
+        break;
+      }
+    }
+
+    if (!fromEvent || !toEvent || fromIdx >= toIdx) continue;
+
+    // Check if this departure is within the next 90 minutes for today OR yesterday service day
+    // For "today" service: compare departureSeconds against todaySecSinceMidnight
+    // For "yesterday" (late-night): compare against secSinceMidnightYesterday
+    let minsUntilDep: number | null = null;
+
+    // Today's service day
+    const depSecsFromTodayMidnight = fromEvent.departureSeconds;
+    const diffTodaySec = depSecsFromTodayMidnight - todaySecSinceMidnight;
+    if (diffTodaySec >= -60 && diffTodaySec <= 90 * 60) {
+      minsUntilDep = Math.max(0, Math.round(diffTodaySec / 60));
+    }
+
+    // Yesterday's service day (late-night trips that started before midnight)
+    const diffYesterdaySec = fromEvent.departureSeconds - secSinceMidnightYesterday;
+    if (minsUntilDep === null && diffYesterdaySec >= -60 && diffYesterdaySec <= 90 * 60) {
+      minsUntilDep = Math.max(0, Math.round(diffYesterdaySec / 60));
+    }
+
+    if (minsUntilDep === null) continue;
+
+    results.push({ trip, fromEvent, toEvent, minutesUntilDeparture: minsUntilDep });
+  }
+
+  // Sort by departure
+  results.sort((a, b) => a.minutesUntilDeparture - b.minutesUntilDeparture);
+
+  return results.slice(0, 4).map(({ trip, fromEvent, toEvent, minutesUntilDeparture }) => {
+    const fromStopData = dataset.stopsById.get(fromEvent.stopId);
+    const toStopData = dataset.stopsById.get(toEvent.stopId);
+    const route = dataset.routesById.get(trip.routeId);
+    const rideSec = toEvent.departureSeconds - fromEvent.departureSeconds;
+    const departureMs = nowMs + minutesUntilDeparture * 60_000;
+    const arrivalMs = departureMs + rideSec * 1000;
+
+    return {
+      tripId: trip.tripId,
+      routeId: trip.routeId,
+      routeShortName: route?.routeShortName ?? trip.routeId,
+      routeLongName: route?.routeLongName ?? null,
+      routeTypeLabel: "subway" as const,
+      headsign: trip.headsign,
+      directionId: trip.directionId,
+      departureStop: fromStopData ? toPublicStop(fromStopData) : null,
+      arrivalStop: toStopData ? toPublicStop(toStopData) : null,
+      departureTime: new Date(departureMs).toISOString(),
+      arrivalTime: new Date(arrivalMs).toISOString(),
+      scheduledDepartureTime: new Date(departureMs).toISOString(),
+      scheduledArrivalTime: new Date(arrivalMs).toISOString(),
+      minutesUntilDeparture,
+      rideDurationMinutes: Math.max(1, Math.round(rideSec / 60)),
+      originDelaySeconds: null,
+      destinationDelaySeconds: null,
+      isScheduled: true as const, // not live — from static GTFS
+    };
+  });
+}
+
 export async function evaluateTtcCommute(fromStopId: string, toStopId: string) {
   if (fromStopId === toStopId) {
     throw new Error("Origin and destination must be different");
@@ -1340,6 +1513,32 @@ export async function evaluateTtcCommute(fromStopId: string, toStopId: string) {
     console.warn(`[evaluateTtcCommute] No transfer options found for trip: ${fromStopId} -> ${toStopId}`);
   }
 
+  // ── Static subway schedule fallback ─────────────────────────────────────────
+  // TTC subway is absent from the GTFS-RT feed. If neither origin nor destination
+  // returned live results and BOTH are subway stops, try the static schedule.
+  let scheduledOptions: ReturnType<typeof buildScheduledSubwayOptions> = [];
+
+  const isFromSubway = fromStop?.stopName.toLowerCase().includes("station") &&
+    !fromStop.stopName.toLowerCase().includes("go station") &&
+    !fromStop.stopName.toLowerCase().includes("bus bay");
+  const isToSubway = toStop?.stopName.toLowerCase().includes("station") &&
+    !toStop.stopName.toLowerCase().includes("go station") &&
+    !toStop.stopName.toLowerCase().includes("bus bay");
+
+  if (options.length === 0 && transferOptions.length === 0 && isFromSubway && isToSubway) {
+    const subwaySchedule = await getTtcSubwaySchedule();
+    if (subwaySchedule) {
+      scheduledOptions = buildScheduledSubwayOptions(
+        fromCandidateStopIds,
+        toCandidateStopIds,
+        subwaySchedule,
+        dataset,
+        nowMs
+      );
+      console.log(`[evaluateTtcCommute] Subway schedule fallback: ${scheduledOptions.length} scheduled options`);
+    }
+  }
+
   const primaryOption = options[0] ?? null;
   const backupOption =
     options.find(
@@ -1384,6 +1583,7 @@ export async function evaluateTtcCommute(fromStopId: string, toStopId: string) {
     bestTransferOption,
     backupTransferOption,
     totalTransferOptions: transferOptions.length,
-    transferOptions
+    transferOptions,
+    scheduledOptions,
   };
 }

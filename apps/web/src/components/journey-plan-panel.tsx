@@ -67,20 +67,21 @@ function titleCase(s: string) {
 // ─── Journey option union ───────────────────────────────────────────────────
 type AnyOption =
   | { kind: "direct"; opt: TtcCommuteOption; eval: TtcCommuteEvaluationResponse }
-  | { kind: "transfer"; opt: TtcTransferCommuteOption; eval: TtcCommuteEvaluationResponse };
+  | { kind: "transfer"; opt: TtcTransferCommuteOption; eval: TtcCommuteEvaluationResponse }
+  | { kind: "scheduled"; opt: TtcCommuteOption; eval: TtcCommuteEvaluationResponse };
 
 function optionDeparture(o: AnyOption): number {
-  const t = o.kind === "direct" ? o.opt.departureTime : o.opt.firstLeg.departureTime;
+  const t = o.kind === "transfer" ? o.opt.firstLeg.departureTime : o.opt.departureTime;
   return t ? Date.parse(t) : Number.MAX_SAFE_INTEGER;
 }
 
 function optionMinutesAway(o: AnyOption) {
-  return o.kind === "direct" ? o.opt.minutesUntilDeparture : o.opt.minutesUntilDeparture;
+  return o.kind === "transfer" ? o.opt.minutesUntilDeparture : o.opt.minutesUntilDeparture;
 }
 
 function optionTotalMins(o: AnyOption) {
-  if (o.kind === "direct") return o.opt.rideDurationMinutes;
-  return o.opt.totalTravelMinutes;
+  if (o.kind === "transfer") return o.opt.totalTravelMinutes;
+  return o.opt.rideDurationMinutes;
 }
 
 // ─── Timeline sub-components ───────────────────────────────────────────────
@@ -369,10 +370,16 @@ function JourneyTimeline({
   const hasWalkIn = walkInMeters > 30;
   const hasWalkOut = walkOutMeters > 30;
 
-  if (option.kind === "direct") {
+  if (option.kind === "direct" || option.kind === "scheduled") {
     const opt = option.opt;
     return (
       <div style={{ paddingTop: 4 }}>
+        {option.kind === "scheduled" && (
+          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 6, fontSize: "0.75rem", color: "#b05a00", background: "rgba(231,112,73,0.1)", borderRadius: 8, padding: "5px 10px" }}>
+            <i className="bi bi-clock" aria-hidden="true" />
+            Schedule only — no live tracking for subway
+          </div>
+        )}
         <AddressPin label={originLabel} />
         {hasWalkIn && <WalkLeg meters={walkInMeters} />}
         <StopNode
@@ -469,14 +476,14 @@ function OptionChip({
   selected: boolean;
   onClick: () => void;
 }) {
-  const dep = option.kind === "direct" ? option.opt.departureTime : option.opt.firstLeg.departureTime;
+  const dep = option.kind === "transfer" ? option.opt.firstLeg.departureTime : option.opt.departureTime;
   const mins = optionMinutesAway(option);
   const total = optionTotalMins(option);
   const isTransfer = option.kind === "transfer";
   const routeLabel =
-    option.kind === "direct"
-      ? (option.opt.routeShortName ?? titleCase(option.opt.routeTypeLabel))
-      : `${option.opt.firstLeg.routeShortName ?? "?"} → ${option.opt.secondLeg.routeShortName ?? "?"}`;
+    option.kind === "transfer"
+      ? `${option.opt.firstLeg.routeShortName ?? "?"} → ${option.opt.secondLeg.routeShortName ?? "?"}`
+      : (option.opt.routeShortName ?? titleCase(option.opt.routeTypeLabel));
 
   return (
     <button
@@ -500,6 +507,7 @@ function OptionChip({
       <div style={{ fontSize: "0.7rem", fontWeight: 700, color: selected ? "#0f5b52" : "#888", textTransform: "uppercase", letterSpacing: "0.06em" }}>
         {index === 0 ? "Best" : `Option ${index + 1}`}
         {isTransfer && " · Transfer"}
+        {option.kind === "scheduled" && " · Schedule"}
       </div>
       <div style={{ fontSize: "1.05rem", fontWeight: 800, color: selected ? "#0f5b52" : "var(--signalto-ink)" }}>
         {mins === 0 ? "Now" : `${mins} min`}
@@ -647,7 +655,8 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
   const allOptions: AnyOption[] = ev
     ? [
         ...ev.options.slice(0, 4).map((opt): AnyOption => ({ kind: "direct", opt, eval: ev })),
-        ...ev.transferOptions.slice(0, 3).map((opt): AnyOption => ({ kind: "transfer", opt, eval: ev }))
+        ...ev.transferOptions.slice(0, 3).map((opt): AnyOption => ({ kind: "transfer", opt, eval: ev })),
+        ...(ev.scheduledOptions ?? []).slice(0, 4).map((opt): AnyOption => ({ kind: "scheduled", opt, eval: ev }))
       ].sort((a, b) => optionDeparture(a) - optionDeparture(b))
     : [];
 
@@ -867,6 +876,9 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
                 {selectedOptionIdx === 0 ? "Best option" : `Option ${selectedOptionIdx + 1}`}
                 {selectedOption.kind === "transfer" && (
                   <span className="ms-2" style={{ color: "#e77049" }}>· Transfer required</span>
+                )}
+                {selectedOption.kind === "scheduled" && (
+                  <span className="ms-2" style={{ color: "#b05a00" }}>· Scheduled (subway)</span>
                 )}
               </div>
               <JourneyTimeline

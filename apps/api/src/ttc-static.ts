@@ -57,6 +57,53 @@ export type TtcTrip = {
   directionId: number | null;
 };
 
+// ─── Subway static schedule (fallback — subway not in GTFS-RT) ─────────────────
+
+export type SubwayStopTime = {
+  stopId: string;
+  /** Seconds since midnight of the GTFS service day (can be >86400 for late-night) */
+  departureSeconds: number;
+};
+
+export type SubwayScheduledTrip = {
+  tripId: string;
+  routeId: string;
+  serviceId: string | null;
+  headsign: string | null;
+  directionId: number | null;
+  stops: SubwayStopTime[];
+};
+
+export type SubwayCalendar = {
+  serviceId: string;
+  monday: boolean;
+  tuesday: boolean;
+  wednesday: boolean;
+  thursday: boolean;
+  friday: boolean;
+  saturday: boolean;
+  sunday: boolean;
+  startDate: string; // YYYYMMDD
+  endDate: string;   // YYYYMMDD
+};
+
+export type SubwayCalendarDate = {
+  serviceId: string;
+  date: string;        // YYYYMMDD
+  exceptionType: number; // 1=added, 2=removed
+};
+
+export type TtcSubwaySchedule = {
+  fetchedAt: string;
+  trips: SubwayScheduledTrip[];
+  calendars: SubwayCalendar[];
+  calendarDates: SubwayCalendarDate[];
+};
+
+const KV_SUBWAY_KEY = "ttc-subway-schedule-v1";
+let cachedSubwaySchedule: TtcSubwaySchedule | null = null;
+let subwayCacheExpiresAt = 0;
+
 type SearchableStop = TtcStop & {
   searchText: string;
 };
@@ -70,6 +117,7 @@ export type TtcStaticDataset = {
 };
 
 const STATIC_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const KV_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days — cron refreshes every 6h, this is a safety net
 const KV_DATASET_KEY = "ttc-static-dataset-v1";
 
 // Module-level in-memory cache (warm for the lifetime of this isolate)
@@ -275,7 +323,7 @@ export async function refreshGtfsToKv(): Promise<void> {
 
   if (_kv) {
     await _kv.put(KV_DATASET_KEY, JSON.stringify(serialize(dataset)), {
-      expirationTtl: STATIC_CACHE_TTL_MS / 1000
+      expirationTtl: KV_TTL_SECONDS
     });
   }
 
@@ -305,6 +353,26 @@ export async function getTtcStaticDataset(): Promise<TtcStaticDataset> {
 
   // 3. KV not yet populated — cron hasn't run yet
   throw new Error("TTC static data not yet available. Please try again in a few minutes.");
+}
+
+export async function getTtcSubwaySchedule(): Promise<TtcSubwaySchedule | null> {
+  const now = Date.now();
+
+  if (cachedSubwaySchedule && now < subwayCacheExpiresAt) {
+    return cachedSubwaySchedule;
+  }
+
+  if (_kv) {
+    const raw = await _kv.get(KV_SUBWAY_KEY, "text");
+    if (raw) {
+      const schedule = JSON.parse(raw) as TtcSubwaySchedule;
+      cachedSubwaySchedule = schedule;
+      subwayCacheExpiresAt = now + STATIC_CACHE_TTL_MS;
+      return schedule;
+    }
+  }
+
+  return null; // not seeded yet — degrade gracefully
 }
 
 export function toPublicStop(stop: TtcStop) {

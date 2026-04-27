@@ -160,6 +160,8 @@ export type TtcCommuteOption = {
   rideDurationMinutes: number;
   originDelaySeconds: number | null;
   destinationDelaySeconds: number | null;
+  /** True for subway trips that come from the static schedule (not GTFS-RT) */
+  isScheduled?: boolean;
 };
 
 export type TtcCommuteLeg = {
@@ -218,6 +220,8 @@ export type TtcCommuteEvaluationResponse = {
   backupTransferOption: TtcTransferCommuteOption | null;
   totalTransferOptions: number;
   transferOptions: TtcTransferCommuteOption[];
+  /** Upcoming scheduled subway trips (fallback — subway not in GTFS-RT live feed) */
+  scheduledOptions: TtcCommuteOption[];
 };
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
