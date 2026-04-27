@@ -853,12 +853,53 @@ export function JourneyPlanPanel({ presetOriginStop, presetDestinationStop, onSt
             <div className="alert alert-danger rounded-4 border-0 mb-0">{errorMsg}</div>
           ) : !selectedOption ? (
             <div className="signalto-note p-4 signalto-subtle">
-              <div className="mb-2">No TTC service found between these stops right now.</div>
+              <div className="mb-3 fw-semibold" style={{ color: "var(--signalto-ink)" }}>No TTC service found between these stops right now.</div>
               <div className="small mb-3" style={{ opacity: 0.75 }}>
                 This app covers TTC only (bus, streetcar, subway). Your route may require GO Transit, UP Express, or a connection not on TTC.
               </div>
+
+              {/* Walk suggestion */}
+              {fromStop && toStop && (() => {
+                const distM = haversineMeters(fromStop.latitude, fromStop.longitude, toStop.latitude, toStop.longitude);
+                const mins = walkMinutes(distM);
+                const distLabel = distM < 1000 ? `${Math.round(distM)} m` : `${(distM / 1000).toFixed(1)} km`;
+                return (
+                  <div
+                    style={{
+                      background: "rgba(15,91,82,0.07)",
+                      border: "1.5px solid rgba(15,91,82,0.15)",
+                      borderRadius: 12,
+                      padding: "12px 16px",
+                      marginBottom: 14,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14
+                    }}
+                  >
+                    <i className="bi bi-person-walking" style={{ fontSize: "1.6rem", color: "#0f5b52", flexShrink: 0 }} aria-hidden="true" />
+                    <div>
+                      <div className="fw-semibold" style={{ color: "#0f5b52", fontSize: "0.9rem" }}>
+                        Walk — {distLabel} · ~{mins} min
+                      </div>
+                      <div className="small mt-1" style={{ color: "#555" }}>
+                        {fromStop.stopName} → {toStop.stopName}
+                      </div>
+                    </div>
+                    <a
+                      href={`https://www.google.com/maps/dir/?api=1&origin=${fromStop.latitude},${fromStop.longitude}&destination=${toStop.latitude},${toStop.longitude}&travelmode=walking`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-sm ms-auto rounded-pill px-3 fw-semibold"
+                      style={{ background: "#0f5b52", color: "#fff", fontSize: "0.78rem", whiteSpace: "nowrap" }}
+                    >
+                      Open in Maps
+                    </a>
+                  </div>
+                );
+              })()}
+
               <a
-                href={`https://www.triplinx.ca/en/trip-planner`}
+                href="https://www.triplinx.ca/en/trip-planner"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="small"
